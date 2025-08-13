@@ -42,9 +42,10 @@ Frontend: JavaScript, HTML, CSS
 Backend: Node.js, Express
 
 4. Explanation of Normalization
+
 Database normalization is the process of organizing data to reduce redundancy and improve integrity. This system uses a normalized relational model:
 
-Data is separated into multiple tables based on different entities (for example, users, items, orders).
+Data is separated into multiple tables based on different entities
 
 Each table has a primary key and foreign keys to create relationships.
 
