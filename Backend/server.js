@@ -1,252 +1,388 @@
-// server.js - CRUD Express mínimo para usuarios (Postgres local)
-// Este archivo implementa un servidor web básico con operaciones CRUD para gestionar usuarios
+// server.js - Simple Express CRUD for users (Postgres)
+// This file is a basic web server with CRUD operations for users
 
-// ========== IMPORTACIÓN DE DEPENDENCIAS ==========
-// server.js - CRUD Express mínimo para usuarios (Postgres local)
-// Este archivo implementa un servidor web básico con operaciones CRUD para gestionar usuarios
+// ========== IMPORT DEPENDENCIES ========== 
+const express = require('express'); // Web framework
+const { Pool } = require('pg'); // PostgreSQL client
+const cors = require('cors'); // Allow cross-origin requests
+const fs = require('fs'); // File system
+const path = require('path'); // Path utilities
+const multer = require('multer'); // File upload middleware
+const csv = require('csv-parser'); // CSV file parser
+require('dotenv').config(); // Load environment variables
 
-// ========== IMPORTACIÓN DE DEPENDENCIAS ==========
-const express = require('express');     // Framework web para Node.js
-const { Pool } = require('pg');         // Cliente de PostgreSQL para Node.js
-const cors = require('cors');           // Middleware para permitir peticiones desde otros dominios
-require('dotenv').config();             // Carga variables de entorno desde archivo .env
-const multer = require('multer');       // Middleware para manejar subida de archivos (form-data)
-const fs = require('fs');               // Módulo del sistema de archivos para leer y eliminar archivos
-const path = require('path');           // Módulo para trabajar con rutas de archivos
-const csv = require('csv-parser');      // Parser para archivos CSV
-
-// ========== CONFIGURACIÓN DEL SERVIDOR EXPRESS ==========
-const app = express();                  // Crea una instancia de la aplicación Express
-
-// Middleware: funciones que se ejecutan antes de llegar a las rutas
-app.use(cors());                        // Permite peticiones desde cualquier origen (frontend)
-app.use(express.json());                // Permite que Express entienda JSON en el body de las peticiones
-
-// ========== CONFIGURACIÓN DE LA BASE DE DATOS ==========
-// Pool de conexiones: mantiene múltiples conexiones abiertas para mejor rendimiento
+// ========== DATABASE CONNECTION ========== 
+// Create a connection pool to PostgreSQL
 const pool = new Pool({
-  host: process.env.DB_HOST,            // Dirección del servidor de base de datos
-  port: process.env.DB_PORT,            // Puerto de PostgreSQL (generalmente 5432)
-  database: process.env.DB_NAME,        // Nombre de la base de datos
-  user: process.env.DB_USER,            // Usuario de la base de datos
-  password: process.env.DB_PASSWORD,    // Contraseña del usuario
-  ssl: true                             // Desactiva SSL para conexiones locales (actívalo para Supabase)
+  host: process.env.DB_HOST,
+  port: process.env.DB_PORT,
+  database: process.env.DB_NAME,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  ssl: { rejectUnauthorized: false }
 });
 
-// ========== ENDPOINT: LISTAR USUARIOS (READ) ==========
-// GET /users - Obtiene todos los usuarios de la base de datos
-app.get('/clientes', async (req, res) => {
-  try {
-    // Ejecuta consulta SQL para obtener todos los usuarios ordenados por ID
-    const r = await pool.query('SELECT * FROM clientes ORDER BY id');
-    
-    // Devuelve los resultados como JSON
-    // r.rows contiene un array con todos los registros encontrados
-    res.json(r.rows);
-  } catch (error) {
-    // En caso de error, devuelve un mensaje de error
-    console.error('Error al obtener usuarios:', error);
-    res.status(500).json({ error: 'Error al obtener usuarios' });
-  }
-});
 
-// ========== ENDPOINT: CREAR USUARIO (CREATE) ==========
-// POST /users - Crea un nuevo usuario en la base de datos
-app.post('/users', async (req, res) => {
-  try {
-    // Extrae datos del cuerpo de la petición
-    // Si no se proporciona 'role', usa 'member' como valor por defecto
-    const { username, role = 'member' } = req.body;
-    
-    // Validación básica
-    if (!username) {
-      return res.status(400).json({ error: 'El username es requerido' });
-    }
-    
-    // Ejecuta consulta SQL para insertar nuevo usuario
-    // $1, $2 son parámetros seguros que previenen inyección SQL
-    // RETURNING * devuelve el registro recién creado
-    const r = await pool.query(
-      'INSERT INTO users (username, role) VALUES ($1, $2) RETURNING *',
-      [username, role]  // Array con los valores para los parámetros $1, $2
-    );
-    
-    // Devuelve el usuario creado (primer elemento del array de resultados)
-    res.json(r.rows[0]);
-  } catch (error) {
-    console.error('Error al crear usuario:', error);
-    res.status(500).json({ error: 'Error al crear usuario' });
-  }
-});
+// ========== EXPRESS APP SETUP ========== 
+const app = express();
+app.use(cors()); // Enable CORS
+app.use(express.json()); // Parse JSON bodies
 
-// ========== ENDPOINT: ACTUALIZAR USUARIO (UPDATE) ==========
-// PATCH /users/:id - Actualiza un usuario existente (actualización parcial)
-app.patch('/users/:id', async (req, res) => {
-  try {
-    // Extrae datos del cuerpo de la petición
-    const { username, role } = req.body;
-    
-    // req.params.id obtiene el ID desde la URL (ej: /users/123 -> id = 123)
-    const userId = req.params.id;
-    
-    // Validación del ID
-    if (!userId || isNaN(userId)) {
-      return res.status(400).json({ error: 'ID de usuario inválido' });
-    }
-    
-    // COALESCE: si el nuevo valor es NULL, mantiene el valor actual
-    // Esto permite actualizaciones parciales (solo username, solo role, o ambos)
-    const r = await pool.query(
-      'UPDATE users SET username=COALESCE($2, username), role=COALESCE($3, role) WHERE id=$1 RETURNING *',
-      [userId, username, role]  // $1=id, $2=username, $3=role
-    );
-    
-    // Si no se encontró el usuario, r.rows[0] será undefined
-    // Devuelve el usuario actualizado o null si no existe
-    res.json(r.rows[0] || null);
-  } catch (error) {
-    console.error('Error al actualizar usuario:', error);
-    res.status(500).json({ error: 'Error al actualizar usuario' });
-  }
-});
 
-// ========== ENDPOINT: ELIMINAR USUARIO (DELETE) ==========
-// DELETE /users/:id - Elimina un usuario de la base de datos
-app.delete('/users/:id', async (req, res) => {
-  try {
-    const userId = req.params.id;
-    
-    // Validación del ID
-    if (!userId || isNaN(userId)) {
-      return res.status(400).json({ error: 'ID de usuario inválido' });
-    }
-    
-    // Ejecuta consulta para eliminar usuario por ID
-    // RETURNING * devuelve los datos del registro eliminado
-    const r = await pool.query(
-      'DELETE FROM users WHERE id=$1 RETURNING *', 
-      [userId]
-    );
-    
-    // Si no se encontró el usuario para eliminar, r.rows[0] será undefined
-    // Devuelve los datos del usuario eliminado o null si no existía
-    res.json(r.rows[0] || null);
-  } catch (error) {
-    console.error('Error al eliminar usuario:', error);
-    res.status(500).json({ error: 'Error al eliminar usuario' });
-  }
-});
-
-// ========== ENDPOINT: SUBIDA MASIVA DE USUARIOS (CREATE) ==========
-// Configuración de Multer para guardar archivos en la carpeta 'uploads'
-// Crea el directorio 'uploads' si no existe, para evitar errores con multer
+// ========== MASS UPLOAD FROM CSV ========== 
 const uploadsDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir);
 }
-
-// Configuración de Multer para guardar archivos en la carpeta 'uploads'
 const upload = multer({ dest: uploadsDir });
-    
-// POST /users/upload - Sube un archivo CSV o TXT para crear usuarios masivamente
-app.post('/clientes/upload', upload.single('file'), async (req, res) => {
-  // Verifica si se subió un archivo
+
+// ========== IMPORT ALL NORMALIZED DATA ========== 
+// POST /import-all - Import normalized CSV into all tables
+app.post('/import-all', upload.single('file'), async (req, res) => {
   if (!req.file) {
-    return res.status(400).json({ error: 'No se subió ningún archivo.' });
+    return res.status(400).json({ error: 'No file uploaded.' });
   }
-
-  const filePath = req.file.path; // Ruta del archivo temporal subido por multer
-  const fileExt = path.extname(req.file.originalname).toLowerCase(); // Extensión del archivo original
-  const usersToInsert = [];
-
+  const filePath = req.file.path;
+  const rows = [];
   try {
-    // Procesa el archivo según su extensión
-    if (fileExt === '.csv') {
-      // Procesa un archivo CSV
-      await new Promise((resolve, reject) => {
-        fs.createReadStream(filePath)
-          .pipe(csv())
-          .on('data', (row) => {
-            // Busca el username en varias columnas posibles para mayor flexibilidad
-            const username = row.username || row.user || row.name || row.nombre;
-            if (username) {
-              usersToInsert.push({ username: username.trim(), role: row.role || 'member' });
-            }
-          })
-          .on('end', resolve)
-          .on('error', reject);
-      });
-    } else if (fileExt === '.txt') {
-      // Procesa un archivo de texto plano (un username por línea)
-      const fileContent = fs.readFileSync(filePath, 'utf8');
-      const lines = fileContent.split(/\r?\n/); // Divide por saltos de línea
-      lines.forEach(line => {
-        const username = line.trim();
-        if (username) { // Ignora líneas vacías
-          usersToInsert.push({ username, role: 'member' });
-        }
-      });
-    } else {
-      // Si el formato no es soportado, devuelve un error
-            // Si el formato no es soportado, se devolverá un error y el archivo se limpiará en el `finally`
-      return res.status(400).json({ error: 'Formato de archivo no soportado. Use CSV o TXT.' });
-    }
-
-    // Si no se encontraron usuarios para insertar, termina el proceso
-    if (usersToInsert.length === 0) {
-            // Si no se encontraron usuarios, se devolverá un error y el archivo se limpiará en el `finally`
-      return res.status(400).json({ error: 'El archivo está vacío o no contiene datos válidos.' });
-    }
-
-    // Prepara los datos para una inserción masiva (bulk insert).
-    // 1. .map(): Transforma cada objeto de usuario en una cadena SQL como ('nombre', 'rol').
-    // 2. .replace(/'/g, "''"): Escapa las comillas simples en los usernames para prevenir inyección SQL.
-    // 3. .join(','): Une todas las cadenas en una sola, separada por comas, para la consulta.
-    // Esto es mucho más eficiente que hacer un INSERT por cada usuario.
-    const values = usersToInsert.map(user => `('${user.username.replace(/'/g, "''")}', '${user.role}')`).join(',');
-    const query = `INSERT INTO users (username, role) VALUES ${values} RETURNING *`;
-    
-    // Ejecuta la consulta de inserción masiva en la base de datos.
-    // `await` pausa la ejecución hasta que la base de datos completa la operación.
-    // Gracias a `RETURNING *`, la variable `r` contendrá todos los usuarios que se crearon.
-    const r = await pool.query(query);
-
-    // Envía una respuesta con el número de usuarios creados y sus datos
-    res.status(201).json({ 
-      message: `${r.rowCount} usuarios creados exitosamente.`,
-      users: r.rows 
+    // Read CSV and collect all rows
+    await new Promise((resolve, reject) => {
+      fs.createReadStream(filePath)
+        .pipe(csv())
+        .on('data', (row) => rows.push(row))
+        .on('end', resolve)
+        .on('error', reject);
     });
 
+    let insertedCustomers = 0;
+    let insertedInvoices = 0;
+    let insertedTransactions = 0;
+
+    for (const row of rows) {
+      // 1. Insert/find customer
+      const customerResult = await pool.query(
+        `INSERT INTO customers (name, identification_number, address, phone, email)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (identification_number) DO UPDATE SET name=EXCLUDED.name RETURNING *`,
+        [
+          row.name?.trim(),
+          row.identification_number,
+          row.address?.trim(),
+          row.phone?.trim(),
+          row.email?.trim()
+        ]
+      );
+      const customer = customerResult.rows[0];
+      if (customerResult.rowCount > 0) insertedCustomers++;
+
+      // 2. Insert/find invoice
+      // Convert billing_period to date (YYYY-MM or YYYY-MM-DD)
+      let billingPeriod = row.billing_period;
+      if (billingPeriod && billingPeriod.length === 7) billingPeriod += '-01';
+      const invoiceResult = await pool.query(
+        `INSERT INTO invoices (customer_id, invoice_number, billing_period, invoiced_amount, paid_amount)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (invoice_number) DO UPDATE SET invoiced_amount=EXCLUDED.invoiced_amount RETURNING *`,
+        [
+          customer.customer_id,
+          row.invoice_number,
+          billingPeriod,
+          row.invoices_amount || row.invoiced_amount,
+          row.paid_amount || 0
+        ]
+      );
+      const invoice = invoiceResult.rows[0];
+      if (invoiceResult.rowCount > 0) insertedInvoices++;
+
+      // 3. Insert transaction
+      // Map status/type to DB values
+      let status = row.transaction_status?.toUpperCase();
+      if (status === 'PENDIENTE') status = 'PENDING';
+      if (status === 'COMPLETADA') status = 'COMPLETED';
+      if (status === 'FALLIDA') status = 'FAILED';
+      let type = row.transaction_type?.toUpperCase();
+      if (type === 'PAGO DE FACTURA') type = 'INVOICE_PAYMENT';
+      // Insert transaction
+      await pool.query(
+        `INSERT INTO transactions (transaction_id, invoice_id, transaction_datetime, transaction_amount, transaction_status, transaction_type, payment_platform)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         ON CONFLICT (transaction_id) DO NOTHING`,
+        [
+          row.transaction_id,
+          invoice.invoice_id,
+          row.transaction_datetime,
+          row.transaction_amount,
+          status,
+          type,
+          row.payment_platform
+        ]
+      );
+      insertedTransactions++;
+    }
+
+    res.status(201).json({
+      message: 'Import completed',
+      customers: insertedCustomers,
+      invoices: insertedInvoices,
+      transactions: insertedTransactions
+    });
   } catch (error) {
-    console.error('Error al procesar el archivo:', error);
-    res.status(500).json({ error: 'Error interno al procesar el archivo.' });
+    console.error('Error importing all data:', error);
+    res.status(500).json({ error: 'Internal error importing all data.' });
   } finally {
-        // Asegura que el archivo temporal se elimine siempre, si aún existe
     if (fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);
     }
   }
 });
 
-// ========== ENDPOINT: VERIFICACIÓN DE SALUD ==========
-// GET /health - Endpoint simple para verificar que el servidor está funcionando
+// ========== CRUD ENDPOINTS FOR CUSTOMERS ========== 
+// GET /customers - Get all customers
+app.get('/customers', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT * FROM customers ORDER BY customer_id');
+    res.json(r.rows);
+  } catch (error) {
+    console.error('Error getting customers:', error);
+    res.status(500).json({ error: 'Error getting customers' });
+  }
+});
+
+// POST /customers - Create a new customer
+app.post('/customers', async (req, res) => {
+  try {
+    const { name, identification_number, address, phone, email } = req.body;
+    // Check all fields
+    if (!name || !identification_number || !address || !phone || !email) {
+      return res.status(400).json({ error: 'All fields are required' });
+    }
+    // Insert customer into database
+    const r = await pool.query(
+      `INSERT INTO customers (name, identification_number, address, phone, email)
+       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [name, identification_number, address, phone, email]
+    );
+    res.status(201).json(r.rows[0]);
+  } catch (error) {
+    console.error('Error creating customer:', error);
+    res.status(500).json({ error: 'Error creating customer' });
+  }
+});
+
+// PATCH /customers/:id - Update a customer
+app.patch('/customers/:id', async (req, res) => {
+  try {
+    const { name, identification_number, address, phone, email } = req.body;
+    const id = req.params.id;
+    // Update customer in database
+    const r = await pool.query(
+      `UPDATE customers SET
+        name = COALESCE($1, name),
+        identification_number = COALESCE($2, identification_number),
+        address = COALESCE($3, address),
+        phone = COALESCE($4, phone),
+        email = COALESCE($5, email)
+      WHERE customer_id = $6 RETURNING *`,
+      [name, identification_number, address, phone, email, id]
+    );
+    res.json(r.rows[0] || null);
+  } catch (error) {
+    console.error('Error updating customer:', error);
+    res.status(500).json({ error: 'Error updating customer' });
+  }
+});
+
+// DELETE /customers/:id - Delete a customer
+app.delete('/customers/:id', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const r = await pool.query(
+      'DELETE FROM customers WHERE customer_id = $1 RETURNING *',
+      [id]
+    );
+    res.json(r.rows[0] || null);
+  } catch (error) {
+    console.error('Error deleting customer:', error);
+    res.status(500).json({ error: 'Error deleting customer' });
+  }
+});
+
+// ========== MASS UPLOAD FROM CSV ========== 
+// POST /customers/upload - Upload CSV and insert into customers, invoices, and transactions
+app.post('/customers/upload', upload.single('file'), async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'No file uploaded.' });
+  }
+  const filePath = req.file.path;
+  const rows = [];
+  try {
+    await new Promise((resolve, reject) => {
+      fs.createReadStream(filePath)
+        .pipe(csv())
+        .on('data', (row) => rows.push(row))
+        .on('end', resolve)
+        .on('error', reject);
+    });
+
+    let insertedCustomers = 0;
+    let insertedInvoices = 0;
+    let insertedTransactions = 0;
+
+    for (const row of rows) {
+      const customerResult = await pool.query(
+        `INSERT INTO customers (name, identification_number, address, phone, email)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (identification_number) DO UPDATE SET name=EXCLUDED.name RETURNING *`,
+        [
+          row.name?.trim(),
+          row.identification_number,
+          row.address?.trim(),
+          row.phone?.trim(),
+          row.email?.trim()
+        ]
+      );
+      const customer = customerResult.rows[0];
+      if (customerResult.rowCount > 0) insertedCustomers++;
+
+      let billingPeriod = row.billing_period;
+      if (billingPeriod && billingPeriod.length === 7) billingPeriod += '-01';
+      const invoiceResult = await pool.query(
+        `INSERT INTO invoices (customer_id, invoice_number, billing_period, invoiced_amount, paid_amount)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (invoice_number) DO UPDATE SET invoiced_amount=EXCLUDED.invoiced_amount RETURNING *`,
+        [
+          customer.customer_id,
+          row.invoice_number,
+          billingPeriod,
+          row.invoices_amount || row.invoiced_amount,
+          row.paid_amount || 0
+        ]
+      );
+      const invoice = invoiceResult.rows[0];
+      if (invoiceResult.rowCount > 0) insertedInvoices++;
+
+      let status = row.transaction_status?.toUpperCase();
+      if (status === 'PENDIENTE') status = 'PENDING';
+      if (status === 'COMPLETADA') status = 'COMPLETED';
+      if (status === 'FALLIDA') status = 'FAILED';
+      let type = row.transaction_type?.toUpperCase();
+      if (type === 'PAGO DE FACTURA') type = 'INVOICE_PAYMENT';
+      await pool.query(
+        `INSERT INTO transactions (transaction_id, invoice_id, transaction_datetime, transaction_amount, transaction_status, transaction_type, payment_platform)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         ON CONFLICT (transaction_id) DO NOTHING`,
+        [
+          row.transaction_id,
+          invoice.invoice_id,
+          row.transaction_datetime,
+          row.transaction_amount,
+          status,
+          type,
+          row.payment_platform
+        ]
+      );
+      insertedTransactions++;
+    }
+
+    res.status(201).json({
+      message: 'Import completed',
+      customers: insertedCustomers,
+      invoices: insertedInvoices,
+      transactions: insertedTransactions
+    });
+  } catch (error) {
+    console.error('Error processing file:', error);
+    res.status(500).json({ error: 'Internal error processing file.' });
+  } finally {
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+  }
+});
+
+// ========== NORMALIZE CUSTOMER CSV ========== 
+// POST /normalize-csv - Normalize a CSV file for customers
+app.post('/normalize-csv', upload.single('file'), async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'No file uploaded.' });
+  }
+  const filePath = req.file.path;
+  const outputFile = path.join(uploadsDir, 'clientes_normalizados.csv');
+  const clientes = [];
+  try {
+    await new Promise((resolve, reject) => {
+      fs.createReadStream(filePath)
+        .pipe(csv())
+        .on('data', (row) => {
+          const name = row['Nombre del Cliente'] || row['name'];
+          const identification_number = row['Número de Identificación'] || row['identification_number'];
+          const address = row['Dirección'] || row['address'];
+          const phone = row['Teléfono'] || row['phone'];
+          const email = row['Correo Electrónico'] || row['email'];
+          if (
+            name && identification_number && address && phone && email &&
+            !isNaN(Number(identification_number))
+          ) {
+            clientes.push({
+              name: name.trim(),
+              identification_number: identification_number.trim(),
+              address: address.trim(),
+              phone: phone.trim(),
+              email: email.trim()
+            });
+          }
+        })
+        .on('end', resolve)
+        .on('error', reject);
+    });
+
+    // Remove duplicates by identification_number
+    const unique = {};
+    clientes.forEach(c => {
+      unique[c.identification_number] = c;
+    });
+    const resultado = Object.values(unique);
+
+    // Write normalized file
+    const encabezado = 'name,identification_number,address,phone,email\n';
+    const filas = resultado.map(c =>
+      `"${c.name}","${c.identification_number}","${c.address}","${c.phone}","${c.email}"`
+    ).join('\n');
+    fs.writeFileSync(outputFile, encabezado + filas, 'utf8');
+
+    res.status(201).json({
+      message: `Normalized file generated.`,
+      customers: resultado.length,
+      file: 'clientes_normalizados.csv'
+    });
+  } catch (error) {
+    console.error('Error normalizing file:', error);
+    res.status(500).json({ error: 'Internal error normalizing file.' });
+  } finally {
+    // Delete uploaded file after processing
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+  }
+});
+
+
+// ========== HEALTH CHECK ========== 
+// GET /health - Check if server is running
 app.get('/health', (req, res) => {
-  // Responde con un JSON simple indicando que el servidor está activo
   res.json({ ok: true, timestamp: new Date().toISOString() });
 });
 
-// ========== INICIO DEL SERVIDOR ==========
-// Define el puerto donde el servidor escuchará las peticiones
+// ========== START SERVER ========== 
 const PORT = process.env.PORT || 3000;
-
-// Inicia el servidor y muestra mensaje de confirmación
 app.listen(PORT, () => {
-  console.log(`🚀 Servidor Express ejecutándose en http://localhost:${PORT}`);
-  console.log('📋 Endpoints disponibles:');
-  console.log('   GET    /users     - Listar usuarios');
-  console.log('   POST   /users     - Crear usuario');
-  console.log('   PATCH  /users/:id - Actualizar usuario');
-  console.log('   DELETE /users/:id - Eliminar usuario');
-  console.log('   POST   /users/upload - Cargar usuarios desde archivo');
-  console.log('   GET    /health    - Estado del servidor');
+  console.log(`🚀 Express server running at http://localhost:${PORT}`);
+  console.log('📋 Available endpoints:');
+  console.log('   GET    /health    - Server status');
+  console.log('   GET    /customers     - List customers');
+  console.log('   POST   /customers     - Create customer');
+  console.log('   PATCH  /customers/:id - Update customer');
+  console.log('   DELETE /customers/:id - Delete customer');
+  console.log('   POST   /customers/upload - Mass upload CSV');
+  console.log('   POST   /normalize-csv - Normalize customer CSV');
 });

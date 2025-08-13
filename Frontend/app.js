@@ -1,172 +1,88 @@
-/**
- * Funcionalidad principal JS para el CRUD de usuarios
- * Archivo para el frontend estático que consume el backend Express
- */
+// Function to get and show all customers in the table
+async function fetchCustomers() {
+  // Get customers from backend
+  const res = await fetch('http://localhost:3000/customers');
+  const data = await res.json();
+  // Find the table body
+  const tbody = document.querySelector('#customers-table tbody');
+  tbody.innerHTML = '';
+  // Add each customer to the table
+  data.forEach(c => {
+    tbody.innerHTML += `<tr>
+      <td>${c.customer_id}</td>
+      <td><span class="customer-name">${c.name}</span></td>
+      <td>${c.identification_number}</td>
+      <td>${c.address}</td>
+      <td>${c.phone}</td>
+      <td>${c.email}</td>
+      <td>
+        <button class="edit-btn" data-id="${c.customer_id}" data-name="${c.name}">Edit</button>
+        <button class="delete-btn" data-id="${c.customer_id}">Delete</button>
+      </td>
+    </tr>`;
+  });
 
-// URL base del backend Express (asegúrate que coincida con tu backend)
-const API_URL = 'http://localhost:3000/users'; // URL del backend Express
+  // Add event to delete buttons
+  tbody.querySelectorAll('.delete-btn').forEach(btn => {
+    btn.onclick = async e => {
+      const id = btn.getAttribute('data-id');
+      // Ask user before delete
+      if (confirm('Are you sure you want to delete this user?')) {
+        await fetch(`http://localhost:3000/customers/${id}`, { method: 'DELETE' });
+        fetchCustomers(); // Refresh table
+      }
+    };
+  });
 
-// Cuando la página carga, se llama automáticamente a loadUsers para mostrar la lista de usuarios
-window.onload = function() {
-    loadUsers(); // Al cargar la página, mostrar usuarios
+  // Add event to edit buttons
+  tbody.querySelectorAll('.edit-btn').forEach(btn => {
+    btn.onclick = async e => {
+      const id = btn.getAttribute('data-id');
+      const oldName = btn.getAttribute('data-name');
+      // Ask for new name
+      const newName = prompt('New name:', oldName);
+      if (newName && newName !== oldName) {
+        await fetch(`http://localhost:3000/customers/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: newName })
+        });
+        fetchCustomers(); // Refresh table
+      }
+    };
+  });
+}
+
+// Event for add customer form
+document.getElementById('customer-form').onsubmit = async e => {
+  e.preventDefault(); // Stop page reload
+  const form = e.target;
+  // Get form data
+  const body = Object.fromEntries(new FormData(form));
+  // Send data to backend
+  await fetch('http://localhost:3000/customers', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  form.reset(); // Clear form
+  fetchCustomers(); // Refresh table
 };
 
+// Event for upload CSV form
+document.getElementById('upload-form').onsubmit = async e => {
+  e.preventDefault(); // Stop page reload
+  const formData = new FormData(e.target);
+  // Send file to backend
+  await fetch('http://localhost:3000/customers/upload', {
+    method: 'POST',
+    body: formData
+  });
+  fetchCustomers(); // Refresh table
+};
 
-// CREATE - Crear nuevo usuario
-// Envía los datos del formulario al backend para crear un usuario
-async function createUser() {
-    const username = document.getElementById('newUsername').value.trim(); // Obtiene el valor del input
-    const role = document.getElementById('newRole').value; // Obtiene el rol seleccionado
-    if (!username) { // Validación: campo obligatorio
-        alert('El nombre de usuario es requerido');
-        return;
-    }
-    try {
-        const res = await fetch(API_URL, {
-            method: 'POST', // Método HTTP para crear
-            headers: { 'Content-Type': 'application/json' }, // Indica que se envía JSON
-            body: JSON.stringify({ username, role }) // Datos enviados al backend
-        });
-        if (!res.ok) throw new Error('Error al crear usuario'); // Si la respuesta no es exitosa
-        alert('Usuario creado exitosamente');
-        document.getElementById('newUsername').value = ''; // Limpia el input
-        loadUsers(); // Recarga la lista
-    } catch (error) {
-        alert(`Error al crear usuario: ${error.message}`);
-    }
-}
+// Event for reload button
+document.getElementById('reload-btn').onclick = fetchCustomers;
 
-
-// READ - Cargar todos los usuarios
-// Hace una petición al backend y renderiza la tabla con los usuarios existentes
-async function loadUsers() {
-    try {
-        const users = await (await fetch(API_URL)).json(); // Recibe array directo
-        renderUsers(users); // Pasa array directamente
-    } catch (error) {
-        alert(`Error al cargar usuarios: ${error.message}`);
-    }
-}
-
-
-// Renderizar usuarios en la tabla HTML
-// Recibe un array de usuarios y lo muestra en el tbody
-function renderUsers(users) {
-    const tbody = document.getElementById('usersBody'); // Referencia al tbody de la tabla
-    if (users.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5">No hay usuarios para mostrar</td></tr>'; // Mensaje si no hay usuarios
-        return;
-    }
-    tbody.innerHTML = users.map(user => {
-        const createdDate = new Date(user.created_at).toLocaleDateString('es-ES'); // Formatea fecha
-        return `
-            <tr>
-                <td>${user.id}</td>
-                <td>${user.username}</td>
-                <td><span style="background: ${getRoleColor(user.role)}; padding: 2px 6px; border-radius: 3px; font-size: 12px;">${user.role}</span></td>
-                <td>${createdDate}</td>
-                <td>
-                    <button class="btn-warning" onclick="editUser(${user.id}, '${user.username}', '${user.role}')">Editar</button>
-                    <button class="btn-danger" onclick="deleteUser(${user.id})">Eliminar</button>
-                </td>
-            </tr>
-        `; // Crea una fila por usuario
-    }).join('');
-}
-
-// Función auxiliar para asignar color a cada rol
-// Devuelve un color según el tipo de rol del usuario
-function getRoleColor(role) {
-    // Devuelve un color diferente según el rol
-    switch(role) {
-        case 'admin': return '#dc3545'; // Rojo
-        case 'editor': return '#ffc107'; // Amarillo
-        case 'member': return '#28a745'; // Verde
-        default: return '#6c757d'; // Gris
-    }
-}
-
-
-// UPDATE - Editar usuario
-// Pide al usuario los nuevos valores (prompt) y envía PATCH al backend
-// Incluye validaciones para evitar campos vacíos o roles inválidos
-async function editUser(id, currentUsername, currentRole) {
-    const newUsername = prompt('Nuevo nombre de usuario:', currentUsername); // Pide nuevo username
-    if (newUsername === null) return; // Usuario canceló
-    if (newUsername.trim() === '') {
-        alert('El nombre de usuario no puede estar vacío');
-        return;
-    }
-    const roles = ['member', 'admin', 'editor']; // Roles válidos
-    let newRole = prompt(`Nuevo rol (${roles.join(', ')}):`, currentRole); // Pide nuevo rol
-    if (newRole === null) return; // Usuario canceló
-    if (!roles.includes(newRole)) {
-        alert('Rol inválido. Debe ser: member, admin o editor');
-        return;
-    }
-    try {
-        const res = await fetch(`${API_URL}/${id}`, {
-            method: 'PATCH', // Método HTTP para actualizar
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username: newUsername.trim(), role: newRole })
-        });
-        if (!res.ok) throw new Error('Error al actualizar usuario'); // Si la respuesta no es exitosa
-        alert('Usuario actualizado exitosamente');
-        loadUsers();
-    } catch (error) {
-        alert(`Error al actualizar usuario: ${error.message}`);
-    }
-}
-// DELETE - Eliminar usuario
-// Pide confirmación y, si acepta, elimina el usuario enviando DELETE al backend
-// UPLOAD - Subir archivo para creación masiva
-// Envía un archivo (CSV o TXT) al backend para crear usuarios masivamente
-async function uploadUsersFile() {
-    const fileInput = document.getElementById('fileInput');
-    const file = fileInput.files[0];
-
-    if (!file) {
-        alert('Por favor, selecciona un archivo para subir.');
-        return;
-    }
-
-    const formData = new FormData(); // Necesario para enviar archivos
-    formData.append('file', file);
-
-    try {
-        const res = await fetch(`${API_URL}/upload`, {
-            method: 'POST',
-            body: formData // No se necesita 'Content-Type', el navegador lo establece
-        });
-
-        const result = await res.json();
-
-        if (!res.ok) {
-            throw new Error(result.error || 'Error desconocido al subir el archivo');
-        }
-
-        alert(result.message);
-        fileInput.value = ''; // Limpia el input de archivo
-        loadUsers(); // Recarga la lista de usuarios
-    } catch (error) {
-        alert(`Error al subir el archivo: ${error.message}`);
-    }
-}
-
-// DELETE - Eliminar usuario
-// Pide confirmación y, si acepta, elimina el usuario enviando DELETE al backend
-async function deleteUser(id) {
-    if (!confirm('¿Estás seguro de que quieres eliminar este usuario?')) {
-        return; // Si el usuario cancela, no hace nada
-    }
-    try {
-        const res = await fetch(`${API_URL}/${id}`, {
-            method: 'DELETE' // Método HTTP para eliminar
-        });
-        if (!res.ok) throw new Error('Error al eliminar usuario'); // Si la respuesta no es exitosa
-        alert('Usuario eliminado exitosamente');
-        loadUsers();
-    } catch (error) {
-        alert(`Error al eliminar usuario: ${error.message}`);
-    }
-}
+// Load customers when page starts
+fetchCustomers();
