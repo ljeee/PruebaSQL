@@ -300,73 +300,6 @@ app.post('/customers/upload', upload.single('file'), async (req, res) => {
   }
 });
 
-// ========== NORMALIZE CUSTOMER CSV ========== 
-// POST /normalize-csv - Normalize a CSV file for customers
-app.post('/normalize-csv', upload.single('file'), async (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ error: 'No file uploaded.' });
-  }
-  const filePath = req.file.path;
-  const outputFile = path.join(uploadsDir, 'clientes_normalizados.csv');
-  const clientes = [];
-  try {
-    await new Promise((resolve, reject) => {
-      fs.createReadStream(filePath)
-        .pipe(csv())
-        .on('data', (row) => {
-          const name = row['Nombre del Cliente'] || row['name'];
-          const identification_number = row['Número de Identificación'] || row['identification_number'];
-          const address = row['Dirección'] || row['address'];
-          const phone = row['Teléfono'] || row['phone'];
-          const email = row['Correo Electrónico'] || row['email'];
-          if (
-            name && identification_number && address && phone && email &&
-            !isNaN(Number(identification_number))
-          ) {
-            clientes.push({
-              name: name.trim(),
-              identification_number: identification_number.trim(),
-              address: address.trim(),
-              phone: phone.trim(),
-              email: email.trim()
-            });
-          }
-        })
-        .on('end', resolve)
-        .on('error', reject);
-    });
-
-    // Remove duplicates by identification_number
-    const unique = {};
-    clientes.forEach(c => {
-      unique[c.identification_number] = c;
-    });
-    const resultado = Object.values(unique);
-
-    // Write normalized file
-    const encabezado = 'name,identification_number,address,phone,email\n';
-    const filas = resultado.map(c =>
-      `"${c.name}","${c.identification_number}","${c.address}","${c.phone}","${c.email}"`
-    ).join('\n');
-    fs.writeFileSync(outputFile, encabezado + filas, 'utf8');
-
-    res.status(201).json({
-      message: `Normalized file generated.`,
-      customers: resultado.length,
-      file: 'clientes_normalizados.csv'
-    });
-  } catch (error) {
-    console.error('Error normalizing file:', error);
-    res.status(500).json({ error: 'Internal error normalizing file.' });
-  } finally {
-    // Delete uploaded file after processing
-    if (fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath);
-    }
-  }
-});
-
-
 // ========== HEALTH CHECK ========== 
 // GET /health - Check if server is running
 app.get('/health', (req, res) => {
@@ -384,5 +317,4 @@ app.listen(PORT, () => {
   console.log('   PATCH  /customers/:id - Update customer');
   console.log('   DELETE /customers/:id - Delete customer');
   console.log('   POST   /customers/upload - Mass upload CSV');
-  console.log('   POST   /normalize-csv - Normalize customer CSV');
 });
